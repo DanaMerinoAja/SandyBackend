@@ -67,11 +67,10 @@ class SunatClient:
         self.ruc = (ruc_consultante or SUNAT_RUC_CONSULTANTE or "").strip()
         if not _is_valid_ruc(self.ruc):
             raise RuntimeError(f"RUC consultante inválido: '{self.ruc}'")
-
-    @staticmethod
-    def _build_body(comp: Dict[str, Any]) -> Dict[str, Any]:
+        
+    def _build_body(self, comp: Dict[str, Any]) -> Dict[str, Any]:
         body = {
-            "numRuc": (comp.get("numRuc") or "").strip(),
+            "numRuc": (comp.get("numRucE") or "").strip(),
             "codComp": (comp.get("codComp") or "").strip(),
             "numeroSerie": (comp.get("numeroSerie") or "").strip(),
             "numero": (comp.get("numero") or "").strip(),
@@ -82,12 +81,9 @@ class SunatClient:
             body["monto"] = monto
         return body
 
-    @staticmethod
-    def _faltantes(body: Dict[str, Any]) -> List[str]:
-        return [k for k in ["numRuc","codComp","numeroSerie","numero","fechaEmision"] if not body.get(k)]
-
-    def _post_validar(self, body: Dict[str, Any], token: str) -> requests.Response:
-        url = VALIDAR_URL_TMPL.format(ruc=self.ruc)
+    def _post_validar(self, comp: Dict[str, Any], token: str) -> requests.Response:
+        url = VALIDAR_URL_TMPL.format(ruc=comp.get("numRucR"))
+        body = self._build_body(comp)
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -101,21 +97,11 @@ class SunatClient:
         out: List[Dict[str, Any]] = []
 
         for comp in comps:
-            body = self._build_body(comp)
-            missing = self._faltantes(body)
-            if missing:
-                out.append({
-                    "ok": False,
-                    "status": 422,
-                    "payload": {"mensaje": "campos_faltantes", "faltantes": missing},
-                    "body_enviado": body,
-                })
-                continue
+            resp = self._post_validar(comp, token)
 
-            resp = self._post_validar(body, token)
             if resp.status_code == 401:
                 token = self.token_mgr.refresh()
-                resp = self._post_validar(body, token)
+                resp = self._post_validar(comp, token)
 
             try:
                 payload = resp.json()
@@ -126,7 +112,7 @@ class SunatClient:
                 "ok": 200 <= resp.status_code < 300,
                 "status": resp.status_code,
                 "payload": payload,
-                "body_enviado": body,
+                "data_empleada": comp,
             })
 
         return out
