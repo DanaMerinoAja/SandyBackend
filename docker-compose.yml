@@ -6,6 +6,9 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      FB_STORAGE_BUCKET: "sandyassistant-f22c1.firebasestorage.app"
+      GOOGLE_APPLICATION_CREDENTIALS: "keys/sandyassistant-f22c1-firebase-adminsdk-fbsvc-7a930ab7be.json"
     volumes:
       - ./:/app
     command: uvicorn sandy:app --host 0.0.0.0 --port 8000 --reload

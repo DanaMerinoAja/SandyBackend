@@ -4,6 +4,7 @@ from google import genai
 from google.genai import types
 import json
 import filetype
+from typing import Any
 
 load_dotenv()
 
@@ -31,67 +32,61 @@ class ExtractorGemini:
         ]
         self.supported_document_mimes = ["application/pdf"]
 
-    async def extraer_datos(self, archivos):
-        resultados = []
-        for archivo in archivos:
-            contenido = await archivo.read()
+    async def extraer_datos(self, contenido, filename):
+        data_comp:Any={}
 
-            detected_mime_type = None
-            try:
-                kind = filetype.guess(contenido)
-                if kind:
-                    detected_mime_type = kind.mime
-            except Exception as e:
-                print(f"Error al detectar el tipo de archivo para {archivo.filename}: {e}")
-                pass
+        detected_mime_type = None
+        try:
+            kind = filetype.guess(contenido)
+            if kind:
+                detected_mime_type = kind.mime
+        except Exception as e:
+            print(f"Error al detectar el tipo de archivo para {filename}: {e}")
+            pass
+        
+        mime_type_to_send = None
 
-            mime_type_to_send = None
+        if filename.lower().endswith(".pdf"):
+            mime_type_to_send = "application/pdf"
+        elif detected_mime_type and detected_mime_type in self.supported_image_mimes:
+            mime_type_to_send = detected_mime_type
+        elif filename.lower().endswith((".jpg", ".jpeg")):
+            mime_type_to_send = "image/jpeg"
+        elif filename.lower().endswith(".png"):
+            mime_type_to_send = "image/png"
+        elif filename.lower().endswith(".webp"):
+            mime_type_to_send = "image/webp"
 
-            if archivo.filename.lower().endswith(".pdf"):
-                mime_type_to_send = "application/pdf"
-            elif detected_mime_type and detected_mime_type in self.supported_image_mimes:
-                mime_type_to_send = detected_mime_type
-            elif archivo.filename.lower().endswith((".jpg", ".jpeg")):
-                mime_type_to_send = "image/jpeg"
-            elif archivo.filename.lower().endswith(".png"):
-                mime_type_to_send = "image/png"
-            elif archivo.filename.lower().endswith(".webp"):
-                mime_type_to_send = "image/webp"
+        if mime_type_to_send is None:
+            return ({
+                "error": f"Tipo de archivo no soportado o no detectado: {filename}. Tipo MIME detectado: {detected_mime_type}"
+            })
 
-            if mime_type_to_send is None:
-                resultados.append({
-                    "error": f"Tipo de archivo no soportado o no detectado: {archivo.filename}. Tipo MIME detectado: {detected_mime_type}",
-                    "archivo": archivo.filename
-                })
-                continue
+        part = types.Part.from_bytes(data=contenido, mime_type=mime_type_to_send)
 
-            part = types.Part.from_bytes(data=contenido, mime_type=mime_type_to_send)
+        try:
+            response = self.client.models.generate_content(
+                model=os.getenv('GEMINI_MODEL'),
+                contents=[part, self.prompt]
+            )
+            if response.text:
+                raw_text = response.text
+                cleaned_text = raw_text.strip() # Eliminar espacios en blanco al inicio/fin
 
-            try:
-                response = self.client.models.generate_content(
-                    model=os.getenv('GEMINI_MODEL'),
-                    contents=[part, self.prompt]
-                )
-                if response.text:
-                    raw_text = response.text
-                    cleaned_text = raw_text.strip() # Eliminar espacios en blanco al inicio/fin
+                # Detectar y eliminar el bloque de código Markdown
+                if cleaned_text.startswith("```json") and cleaned_text.endswith("```"):
+                    # Eliminar "```json\n" (7 caracteres) y "```" (3 caracteres)
+                    cleaned_text = cleaned_text[7:-3].strip()
 
-                    # Detectar y eliminar el bloque de código Markdown
-                    if cleaned_text.startswith("```json") and cleaned_text.endswith("```"):
-                        # Eliminar "```json\n" (7 caracteres) y "```" (3 caracteres)
-                        cleaned_text = cleaned_text[7:-3].strip()
+                try:
+                    data_comp= json.loads(cleaned_text) # Intentar parsear el texto limpio
+                except json.JSONDecodeError as e:
+                    data_comp= {"error": f"Error al procesar el JSON (después de limpieza): {e}", "respuesta_bruta": raw_text, "texto_intentado_parsear": cleaned_text}
+                except Exception as e:
+                        data_comp= {"error": f"Error inesperado al procesar la respuesta: {e}", "respuesta_bruta": raw_text}
+            else:
+                data_comp={"error": "No se pudo extraer información"}
+        except Exception as e:
+                data_comp={"error": f"{e}"}
 
-                    try:
-                        datos = json.loads(cleaned_text) # Intentar parsear el texto limpio
-                        datos['archivo'] = archivo.filename
-                        resultados.append(datos)
-                    except json.JSONDecodeError as e:
-                        resultados.append({"error": f"Error al procesar el JSON (después de limpieza): {e}", "archivo": archivo.filename, "respuesta_bruta": raw_text, "texto_intentado_parsear": cleaned_text})
-                    except Exception as e:
-                        resultados.append({"error": f"Error inesperado al procesar la respuesta: {e}", "archivo": archivo.filename, "respuesta_bruta": raw_text})
-                else:
-                    resultados.append({"error": "No se pudo extraer información", "archivo": archivo.filename})
-            except Exception as e:
-                resultados.append({"error": f"{e}", "archivo": archivo.filename})
-
-        return resultados
+        return data_comp

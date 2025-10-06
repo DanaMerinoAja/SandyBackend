@@ -73,7 +73,7 @@ class SunatClient:
             "numRuc": (comp.get("numRucE") or "").strip(),
             "codComp": (comp.get("codComp") or "").strip(),
             "numeroSerie": (comp.get("numeroSerie") or "").strip(),
-            "numero": (comp.get("numero") or "").strip(),
+            "numero": (comp.get("numero") or ""),
             "fechaEmision": (comp.get("fechaEmision") or "").strip(),
         }
         monto = (comp.get("monto") or "").strip()
@@ -97,11 +97,14 @@ class SunatClient:
         out: List[Dict[str, Any]] = []
 
         for comp in comps:
-            resp = self._post_validar(comp, token)
+
+            compAux = comp['comp_data']
+
+            resp = self._post_validar(compAux, token)
 
             if resp.status_code == 401:
                 token = self.token_mgr.refresh()
-                resp = self._post_validar(comp, token)
+                resp = self._post_validar(compAux, token)
 
             try:
                 payload = resp.json()
